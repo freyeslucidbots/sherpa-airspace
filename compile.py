@@ -55,10 +55,17 @@ def fetch_json(url: str) -> dict:
     for attempt in range(RETRIES):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=120) as r:
-                return json.load(r)
+                data = json.load(r)
+            # ArcGIS reports throttling and other failures as HTTP 200 with an
+            # "error" body; treating that as end-of-pages once shipped a
+            # silently truncated snapshot (208k of 380k cells). Fail, retry,
+            # and ultimately raise so CI publishes nothing instead.
+            if isinstance(data, dict) and "error" in data:
+                raise RuntimeError(f"ArcGIS error: {data['error']}")
+            return data
         except Exception as e:  # noqa: BLE001 - retry then re-raise
             last = e
-            time.sleep(5 * (attempt + 1))
+            time.sleep(15 * (attempt + 1))
     raise RuntimeError(f"gave up on {url}") from last
 
 
@@ -73,6 +80,7 @@ def query_pages(layer: str, params: dict):
             return
         yield from feats
         offset += len(feats)
+        time.sleep(0.3)  # be polite; throttling is what truncates snapshots
         print(f"  {layer.rsplit('/', 2)[-2]}: {offset} features", flush=True)
         if not data.get("properties", {}).get("exceededTransferLimit") and len(feats) < PAGE:
             return
@@ -199,6 +207,11 @@ def main() -> int:
     dist.mkdir(exist_ok=True)
     cells = build_uasfm(dist)
     polys = build_restrictions(dist)
+    # A snapshot far below the known baseline (~380k cells, ~2.3k polygons,
+    # Oct 2026) means a truncated pull, not a changed national airspace.
+    if cells < 300_000 or polys < 1_000:
+        print(f"SANITY FAIL: {cells} cells / {polys} polygons - refusing to publish")
+        return 1
     # Compress the big grid for the download; the app gunzips on device.
     raw = (dist / "uasfm.bin").read_bytes()
     (dist / "uasfm.bin.gz").write_bytes(gzip.compress(raw, 9))

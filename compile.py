@@ -116,14 +116,61 @@ def build_uasfm(dist: Path) -> int:
     return len(cells)
 
 
+def simplify_ring(ring: list, tolerance: float = 0.0003) -> list:
+    """Douglas-Peucker, iterative. ~30 m tolerance: advisory precision, and it
+    takes the FAA's raw polygons (12-decimal coords, thousands of vertices,
+    37 MB nationwide) down to something a 4 GB controller parses happily."""
+    if len(ring) <= 4:
+        return ring
+    keep = [False] * len(ring)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(ring) - 1)]
+    while stack:
+        a, b = stack.pop()
+        if b - a < 2:
+            continue
+        ax, ay = ring[a][0], ring[a][1]
+        bx, by = ring[b][0], ring[b][1]
+        dx, dy = bx - ax, by - ay
+        norm = (dx * dx + dy * dy) ** 0.5 or 1e-12
+        worst, worst_d = -1, tolerance
+        for i in range(a + 1, b):
+            d = abs(dx * (ay - ring[i][1]) - (ax - ring[i][0]) * dy) / norm
+            if d > worst_d:
+                worst, worst_d = i, d
+        if worst >= 0:
+            keep[worst] = True
+            stack.append((a, worst))
+            stack.append((worst, b))
+    out = [p for p, k in zip(ring, keep) if k]
+    return out if len(out) >= 4 else ring
+
+
+def slim_geometry(geometry: dict | None) -> dict | None:
+    """Simplified outer rings only, coords quantized to 5 decimals (~1 m)."""
+    if not geometry:
+        return None
+    def slim(ring):
+        return [[round(x, 5), round(y, 5)] for x, y, *_ in simplify_ring(ring)]
+    if geometry.get("type") == "Polygon":
+        return {"type": "Polygon", "coordinates": [slim(geometry["coordinates"][0])]}
+    if geometry.get("type") == "MultiPolygon":
+        return {"type": "MultiPolygon",
+                "coordinates": [[slim(poly[0])] for poly in geometry["coordinates"] if poly]}
+    return None
+
+
 def build_restrictions(dist: Path) -> int:
     features = []
     for kind, layer in RESTRICTION_LAYERS:
         for f in query_pages(layer, {"where": "1=1", "outFields": "*", "returnGeometry": "true", "outSR": "4326"}):
             p = f.get("properties", {})
+            geometry = slim_geometry(f.get("geometry"))
+            if geometry is None:
+                continue
             features.append({
                 "type": "Feature",
-                "geometry": f.get("geometry"),
+                "geometry": geometry,
                 "properties": {
                     "kind": kind,
                     "name": p.get("Facility") or p.get("NAME") or p.get("Base") or "",

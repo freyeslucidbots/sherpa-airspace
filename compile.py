@@ -132,7 +132,12 @@ def simplify_ring(ring: list, tolerance: float = 0.0003) -> list:
         return ring
     keep = [False] * len(ring)
     keep[0] = keep[-1] = True
-    stack = [(0, len(ring) - 1)]
+    # Rings are closed (first == last), so the 0..n-1 baseline is a zero-
+    # length segment and every distance is 0 - DP would collapse the ring
+    # and the <4 fallback kept it whole (the 23 MB bug). Seed a midpoint.
+    mid = (len(ring) - 1) // 2
+    keep[mid] = True
+    stack = [(0, mid), (mid, len(ring) - 1)]
     while stack:
         a, b = stack.pop()
         if b - a < 2:
@@ -155,11 +160,22 @@ def simplify_ring(ring: list, tolerance: float = 0.0003) -> list:
 
 
 def slim_geometry(geometry: dict | None) -> dict | None:
-    """Simplified outer rings only, coords quantized to 5 decimals (~1 m)."""
+    """Simplified outer rings only, coords quantized to 5 decimals (~1 m).
+
+    Rings are capped at ~1500 vertices by raising the tolerance until they
+    fit: the NSUFR layer includes coastline-following polygons (territorial
+    waters, 90k+ vertices) that made the nationwide file 23 MB. At advisory
+    precision a few hundred metres of edge error on a multi-kilometre zone
+    is immaterial; the app's card says advisory, not authorization."""
     if not geometry:
         return None
     def slim(ring):
-        return [[round(x, 5), round(y, 5)] for x, y, *_ in simplify_ring(ring)]
+        out = simplify_ring(ring)
+        tolerance = 0.001
+        while len(out) > 1500 and tolerance < 0.1:
+            out = simplify_ring(out, tolerance)
+            tolerance *= 2
+        return [[round(x, 5), round(y, 5)] for x, y, *_ in out]
     if geometry.get("type") == "Polygon":
         return {"type": "Polygon", "coordinates": [slim(geometry["coordinates"][0])]}
     if geometry.get("type") == "MultiPolygon":

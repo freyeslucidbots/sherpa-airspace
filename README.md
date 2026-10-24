@@ -1,11 +1,14 @@
 # sherpa-airspace
 
-Weekly-compiled FAA airspace snapshot for the Lucid controller ("Lucid Bots
-Control" / `lucid-controller`). A GitHub Action runs [compile.py](compile.py)
+Weekly-compiled FAA airspace snapshot for the Lucid Bots controller app
+("Lucid Bots Control", in `lucid-controller`). A GitHub Action runs [compile.py](compile.py)
 every Monday, pulls public FAA UDDS data, and publishes three small files as a
-release. The controller app checks the latest release when it has internet
-(at most weekly), downloads new data, and answers "can I fly here, how high?"
-offline at the job site — DJI-style, without DJI's servers.
+release. The controller app checks the latest release once a day when it has
+internet, downloads anything new, and answers "can I fly here, how high?"
+offline at the job site — DJI-style, without DJI's servers. Pilots see it on
+the home screen's Airspace card and the Airspace details screen (offline map
+of the LAANC grid and restricted areas, the ceiling where they stand, the
+data date, and live TFRs for their state).
 
 ## What's in a release
 
